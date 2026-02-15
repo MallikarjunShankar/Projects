@@ -1,0 +1,17 @@
+# Visual Studio & Build output
+.vs/
+x64/
+x86/
+Debug/
+Release/
+*.pdb
+*.obj
+*.idb
+*.tlog
+*.log
+*.exe
+*.lib
+
+# OS generated
+.DS_Store
+Thumbs.db
