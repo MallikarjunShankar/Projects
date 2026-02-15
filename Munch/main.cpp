@@ -6,18 +6,22 @@
 #include <vector>
 #include <random>
 
+// Game configuration constants
+// Centralized for easy tuning of game balance
 const unsigned int WIN_WIDTH = 1200;
 const unsigned int WIN_HEIGHT = 800;
 const int WIN_SCORE = 100;
 const float PLAYER_SPEED = 400.f;
 const size_t MAX_PARTICLES = 50;
 
+// Encapsulates all entity state: visuals, physics, and input mapping
 struct Player {
     sf::CircleShape shape;
     sf::Vector2f velocity{ 0.f, 0.f };
     float speed;
     int score = 0;
 
+    // Custom key mapping allows reusing the class for both P1 (WASD) and P2 (Arrows)
     struct Controls {
         sf::Keyboard::Key up, down, left, right;
     } keys;
@@ -31,6 +35,7 @@ struct Player {
         shape.setPosition(startPos);
     }
 
+    // Polling-based input handling for smooth continuous movement
     void handleInput() {
         velocity = { 0.f, 0.f };
         if (sf::Keyboard::isKeyPressed(keys.up)) velocity.y -= speed;
@@ -39,6 +44,8 @@ struct Player {
         if (sf::Keyboard::isKeyPressed(keys.right)) velocity.x += speed;
     }
 
+    // Integration step: updates position based on velocity * deltaTime
+    // Includes boundary checks to clamp player within window limits
     void move(float dt, sf::Vector2u winSize) {
         sf::Vector2f pos = shape.getPosition() + velocity * dt;
         float r = shape.getRadius();
@@ -58,6 +65,8 @@ struct Particle {
     }
 };
 
+// Optimized collision detection
+// Compares squared distances to avoid expensive sqrt() operations
 bool checkCollision(const sf::Vector2f& a, float ra, const sf::Vector2f& b, float rb) {
     float dx = a.x - b.x;
     float dy = a.y - b.y;
@@ -67,9 +76,12 @@ bool checkCollision(const sf::Vector2f& a, float ra, const sf::Vector2f& b, floa
 }
 
 int main() {
+    // Window setup with VSync enabled to prevent screen tearing
     sf::RenderWindow window(sf::VideoMode({ WIN_WIDTH, WIN_HEIGHT }), "Munch");
     window.setVerticalSyncEnabled(true);
 
+    // Resource Loading
+    // Checks for essential assets and exits gracefully if missing
     sf::Font font;
     if (!font.openFromFile("arial.ttf")) return EXIT_FAILURE;
 
@@ -82,6 +94,7 @@ int main() {
     pickupSound.setVolume(60.f);
     winSound.setVolume(80.f);
 
+    // UI Initialization
     sf::Text scoreP1(font), scoreP2(font), winText(font);
 
     scoreP1.setCharacterSize(24);
@@ -99,15 +112,18 @@ int main() {
     winText.setCharacterSize(60);
     winText.setStyle(sf::Text::Bold);
 
+    // Instantiate Players with distinct controls
     Player p1(sf::Color::Blue, { 100.f, WIN_HEIGHT / 2.f }, PLAYER_SPEED,
         { sf::Keyboard::Key::W, sf::Keyboard::Key::S, sf::Keyboard::Key::A, sf::Keyboard::Key::D });
 
     Player p2(sf::Color::Yellow, { WIN_WIDTH - 100.f, WIN_HEIGHT / 2.f }, PLAYER_SPEED,
         { sf::Keyboard::Key::Up, sf::Keyboard::Key::Down, sf::Keyboard::Key::Left, sf::Keyboard::Key::Right });
 
+    // Pre-allocate vector memory to avoid reallocation during gameplay
     std::vector<Particle> particles;
     particles.reserve(MAX_PARTICLES);
 
+    // Mersenne Twister RNG for high-quality random distribution
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> xDist(20.f, WIN_WIDTH - 20.f);
     std::uniform_real_distribution<float> yDist(20.f, WIN_HEIGHT - 20.f);
@@ -115,12 +131,15 @@ int main() {
 
     sf::Clock clock;
     bool gameOver = false;
-    bool dirtyScore = false;
+    bool dirtyScore = false; // Flag to minimize expensive text string updates
 
+    // Main Game Loop
     while (window.isOpen()) {
+        // Event Polling
         while (const auto event = window.pollEvent()) {
             if (event->is<sf::Event::Closed>()) window.close();
 
+            // Restart Logic
             if (gameOver && event->is<sf::Event::KeyPressed>()) {
                 if (event->getIf<sf::Event::KeyPressed>()->code == sf::Keyboard::Key::Space) {
                     p1.score = 0;
@@ -134,21 +153,27 @@ int main() {
             }
         }
 
+        // Calculate Delta Time (dt) to ensure frame-rate independent movement
         float dt = std::min(clock.restart().asSeconds(), 0.1f);
 
         if (!gameOver) {
+            // Spawn Logic: 1% chance per frame if under capacity
             if (particles.size() < MAX_PARTICLES && spawnChance(rng) < 0.01f)
                 particles.emplace_back(sf::Vector2f{ xDist(rng), yDist(rng) });
 
+            // Physics Update
             p1.handleInput();
             p2.handleInput();
             p1.move(dt, window.getSize());
             p2.move(dt, window.getSize());
 
+            // Player-vs-Player Collision (Game Over Condition)
             if (checkCollision(p1.shape.getPosition(), p1.shape.getRadius(),
                 p2.shape.getPosition(), p2.shape.getRadius())) {
                 gameOver = true;
                 winSound.play();
+                
+                // Determine Winner
                 if (p1.score > p2.score) {
                     winText.setString("Blue Wins!");
                     winText.setFillColor(sf::Color::Blue);
@@ -163,6 +188,7 @@ int main() {
                 }
             }
 
+            // Player-vs-Particle Collision
             for (size_t i = 0; i < particles.size(); ) {
                 bool collected = false;
                 sf::Vector2f pos = particles[i].shape.getPosition();
@@ -180,6 +206,10 @@ int main() {
                 if (collected) {
                     pickupSound.play();
                     dirtyScore = true;
+                    
+                    // Optimization: Swap-and-Pop
+                    // Replaces the collected particle with the last one and shrinks vector.
+                    // This is O(1) compared to O(n) for erasing from the middle.
                     particles[i] = particles.back();
                     particles.pop_back();
                 }
@@ -188,6 +218,7 @@ int main() {
                 }
             }
 
+            // Score limit check
             if (p1.score >= WIN_SCORE || p2.score >= WIN_SCORE) {
                 gameOver = true;
                 winSound.play();
@@ -201,9 +232,13 @@ int main() {
                 }
             }
 
+            // UI Updates
+            // Only re-generates text strings when score actually changes
             if (dirtyScore || gameOver) {
                 scoreP1.setString("P1: " + std::to_string(p1.score));
                 scoreP2.setString("P2: " + std::to_string(p2.score));
+                
+                // Re-align right-side score text
                 sf::FloatRect b2 = scoreP2.getLocalBounds();
                 scoreP2.setOrigin({ b2.size.x, 0.f });
                 scoreP2.setPosition({ static_cast<float>(WIN_WIDTH) - 20.f, 20.f });
@@ -217,6 +252,7 @@ int main() {
             }
         }
 
+        // Render Phase
         window.clear();
         for (const auto& p : particles) window.draw(p.shape);
         window.draw(p1.shape);

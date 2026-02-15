@@ -7,15 +7,13 @@
 #include <chrono>
 #include <string>
 #include <cstdlib>
-
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
 
 using namespace std;
 using json = nlohmann::json;
 
-const string DB_URL =
-"https://hoard-39f9c-default-rtdb.asia-southeast1.firebasedatabase.app";
+const string DB_URL = "https://hoard-39f9c-default-rtdb.asia-southeast1.firebasedatabase.app";
 
 struct Player {
     string name;
@@ -26,6 +24,7 @@ struct Player {
     double doubleInvestChance = 0.0;
 };
 
+// Returns current timestamp for save/load calculations
 long long now() {
     return time(nullptr);
 }
@@ -48,6 +47,8 @@ bool loadGame(Player& p) {
     f >> p.name >> p.units >> p.rate >> old
         >> p.idleBonus >> p.doubleInvestChance;
 
+    // Calculate offline progress:
+    // Players earn partial resources (10% base + idleBonus) for time spent away.
     long long elapsed = now() - old;
     double efficiency = 0.10 + min(p.idleBonus, 1.0);
     p.units += p.rate * elapsed * efficiency;
@@ -55,6 +56,8 @@ bool loadGame(Player& p) {
     return true;
 }
 
+// Background thread function to handle passive resource gain
+// Independent of user input to ensure real-time progression
 void idleGain(Player& p) {
     while (true) {
         this_thread::sleep_for(chrono::seconds(1));
@@ -71,6 +74,9 @@ void invest(Player& p, double amount) {
 
     p.units -= amount;
 
+    // Diminishing returns formula:
+    // Larger investments yield more rate, but cost efficiency drops as amount scales.
+    // Adds +1000 to denominator to prevent early game exponential explosion.
     double gain = (amount * amount) / (amount + 1000.0);
     double rateIncrease = gain * 0.001;
 
@@ -83,6 +89,8 @@ void invest(Player& p, double amount) {
     p.rate += rateIncrease;
 }
 
+// cURL WriteCallback:
+// Appends data received from the server (chunk by chunk) into our response string.
 size_t writeCallback(void* c, size_t s, size_t n, string* out) {
     out->append((char*)c, s * n);
     return s * n;
@@ -92,8 +100,7 @@ json fetchLeaderboard() {
     CURL* curl = curl_easy_init();
     string response;
 
-    curl_easy_setopt(curl, CURLOPT_URL,
-        (DB_URL + "/leaderboard.json").c_str());
+    curl_easy_setopt(curl, CURLOPT_URL, (DB_URL + "/leaderboard.json").c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
@@ -186,6 +193,7 @@ int main() {
     string savedName;
     bool hasSave = loadSavedName(savedName);
 
+    // Player Initialization Loop
     while (true) {
         cout << "Enter player name: ";
         cin >> p.name;
@@ -205,8 +213,10 @@ int main() {
         p.rate = 1;
     }
 
+    // Launch background thread for resource accumulation
     thread idleThread(idleGain, ref(p));
 
+    // Main Game Loop
     while (true) {
         cout << "\n----------------------------------\n";
         cout << "Units: " << p.units << "\n";
@@ -249,6 +259,7 @@ int main() {
         }
     }
 
+    // Detach thread to allow clean exit
     idleThread.detach();
     return 0;
 }
